@@ -40,7 +40,7 @@ const LAYOUTS = {
   disc: { name: '丸型ディスク', desc: '外径37mm・中心穴6mm ×4', frames: FRAMES_DISC },
 }
 
-const emptySlot = () => ({ img: null, name: '', zoom: 1, minZoom: 1, offsetX: 0, offsetY: 0 })
+const emptySlot = () => ({ img: null, name: '', zoom: 1, minZoom: 1, offsetX: 0, offsetY: 0, rotation: 0 })
 
 // cover基準のzoom=1に対し、写真全体が枠内に収まる倍率（contain）を返す
 const containZoom = (frame, img) => {
@@ -51,19 +51,25 @@ const containZoom = (frame, img) => {
 
 // 1フレーム分の描画パラメータ（frame.x/y を基準に算出）
 function computeDraw(frame, slot) {
-  const { img, zoom, offsetX, offsetY } = slot
+  const { img, zoom, offsetX, offsetY, rotation = 0 } = slot
   const base = Math.max(frame.w / img.naturalWidth, frame.h / img.naturalHeight) // cover
   const scale = base * zoom
   const drawW = img.naturalWidth * scale
   const drawH = img.naturalHeight * scale
-  // 枠内に収まる範囲でオフセットをクランプ
-  const maxOX = Math.abs(drawW - frame.w) / 2
-  const maxOY = Math.abs(drawH - frame.h) / 2
+  // 回転後のバウンディングボックスで、枠を覆う範囲にオフセットをクランプ
+  const rad = (rotation * Math.PI) / 180
+  const c = Math.abs(Math.cos(rad))
+  const s = Math.abs(Math.sin(rad))
+  const boundW = drawW * c + drawH * s
+  const boundH = drawW * s + drawH * c
+  const maxOX = Math.max(0, (boundW - frame.w) / 2)
+  const maxOY = Math.max(0, (boundH - frame.h) / 2)
   const ox = Math.max(-maxOX, Math.min(maxOX, offsetX))
   const oy = Math.max(-maxOY, Math.min(maxOY, offsetY))
-  const dx = frame.x + (frame.w - drawW) / 2 + ox
-  const dy = frame.y + (frame.h - drawH) / 2 + oy
-  return { dx, dy, drawW, drawH }
+  // 画像中心の配置座標（オフセットは画面座標で適用＝ドラッグ操作と一致）
+  const cx = frame.x + frame.w / 2 + ox
+  const cy = frame.y + frame.h / 2 + oy
+  return { cx, cy, drawW, drawH, rad }
 }
 
 // フレームの形状でクリップパスを作る
@@ -84,8 +90,12 @@ function paintFrame(ctx, frame, slot, guides) {
   ctx.fillStyle = '#000000' // 形状の中は黒
   ctx.fillRect(frame.x, frame.y, frame.w, frame.h)
   if (slot.img) {
-    const { dx, dy, drawW, drawH } = computeDraw(frame, slot)
-    ctx.drawImage(slot.img, dx, dy, drawW, drawH)
+    const { cx, cy, drawW, drawH, rad } = computeDraw(frame, slot)
+    ctx.save()
+    ctx.translate(cx, cy)
+    if (rad) ctx.rotate(rad)
+    ctx.drawImage(slot.img, -drawW / 2, -drawH / 2, drawW, drawH)
+    ctx.restore()
   } else if (guides) {
     // アップロード前のプレースホルダー（薄いグレー＋サイズ表記）
     ctx.fillStyle = '#f0f0f3'
@@ -221,12 +231,31 @@ function FrameEditor({ frame, slot, onChange, onFile }) {
               onChange={(e) => onChange({ zoom: parseFloat(e.target.value) })}
             />
           </label>
-          <button
-            className="reset"
-            onClick={() => onChange({ zoom: slot.minZoom, offsetX: 0, offsetY: 0 })}
-          >
-            リセット
-          </button>
+          <label>
+            回転
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={slot.rotation}
+              onChange={(e) => onChange({ rotation: parseInt(e.target.value, 10) })}
+            />
+          </label>
+          <div className="ctrl-row">
+            <button
+              className="reset"
+              onClick={() => onChange({ rotation: ((slot.rotation + 90 + 180) % 360) - 180 })}
+            >
+              ↻ 90°
+            </button>
+            <button
+              className="reset"
+              onClick={() => onChange({ zoom: slot.minZoom, offsetX: 0, offsetY: 0, rotation: 0 })}
+            >
+              リセット
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -309,7 +338,7 @@ export default function App() {
       const minZoom = containZoom(frames[index], img)
       setSlots((prev) => {
         const next = [...prev]
-        next[index] = { img, name: file.name, zoom: minZoom, minZoom, offsetX: 0, offsetY: 0 }
+        next[index] = { img, name: file.name, zoom: minZoom, minZoom, offsetX: 0, offsetY: 0, rotation: 0 }
         return next
       })
     }
@@ -517,14 +546,37 @@ export default function App() {
                         }
                       />
                     </label>
-                    <button
-                      className="reset"
-                      onClick={() =>
-                        updateSlot(i, { zoom: slot.minZoom, offsetX: 0, offsetY: 0 })
-                      }
-                    >
-                      位置リセット
-                    </button>
+                    <label>
+                      回転
+                      <input
+                        type="range"
+                        min="-180"
+                        max="180"
+                        step="1"
+                        value={slot.rotation}
+                        onChange={(e) =>
+                          updateSlot(i, { rotation: parseInt(e.target.value, 10) })
+                        }
+                      />
+                    </label>
+                    <div className="ctrl-row">
+                      <button
+                        className="reset"
+                        onClick={() =>
+                          updateSlot(i, { rotation: ((slot.rotation + 90 + 180) % 360) - 180 })
+                        }
+                      >
+                        ↻ 90°
+                      </button>
+                      <button
+                        className="reset"
+                        onClick={() =>
+                          updateSlot(i, { zoom: slot.minZoom, offsetX: 0, offsetY: 0, rotation: 0 })
+                        }
+                      >
+                        位置リセット
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

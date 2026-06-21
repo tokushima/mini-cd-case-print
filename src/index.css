@@ -171,6 +171,12 @@ canvas:active {
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
 }
 
+.ctrl-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .reset {
   font-size: 12px;
   padding: 6px 10px;
